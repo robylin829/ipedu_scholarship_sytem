@@ -1,6 +1,10 @@
 import { after, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { sendScholarshipConfirmationEmail } from "@/lib/email/resend";
+import {
+  recordScholarshipEmailLog,
+  sendAndLogScholarshipEmail,
+} from "@/lib/email/scholarship-email-logs";
 import { notifyDepartmentOfResubmission } from "@/lib/notifications/resubmission-notice";
 import { patchScholarshipApplication } from "@/lib/supabase/patch-application";
 import {
@@ -83,9 +87,13 @@ function normalizeScholarshipProgram(value?: string | null) {
 async function sendStudentSubmissionConfirmation({
   application,
   fallbackEmail,
+  serviceRoleKey,
+  url,
 }: {
   application: SavedApplicationRecord;
   fallbackEmail: string | null | undefined;
+  serviceRoleKey: string;
+  url: string;
 }) {
   const recipientEmail = application.email || fallbackEmail;
   if (!recipientEmail) {
@@ -93,17 +101,34 @@ async function sendStudentSubmissionConfirmation({
       "Scholarship confirmation email skipped: no recipient email",
       application.id
     );
+    await recordScholarshipEmailLog({
+      applicationId: application.id,
+      emailType: "student_submission_confirmation",
+      failureReason: "找不到可寄送的學生 Email。",
+      recipientEmail: "",
+      serviceRoleKey,
+      status: "failed",
+      url,
+    });
     return;
   }
 
   try {
-    await sendScholarshipConfirmationEmail({
+    await sendAndLogScholarshipEmail({
       applicationId: application.id,
-      applicantName: application.applicant_name || "",
-      department: application.department || "",
+      emailType: "student_submission_confirmation",
       recipientEmail,
-      scholarshipProgram: application.scholarship_program || "獎學金申請",
-      submittedAt: application.submitted_at,
+      serviceRoleKey,
+      url,
+      send: () =>
+        sendScholarshipConfirmationEmail({
+          applicationId: application.id,
+          applicantName: application.applicant_name || "",
+          department: application.department || "",
+          recipientEmail,
+          scholarshipProgram: application.scholarship_program || "獎學金申請",
+          submittedAt: application.submitted_at,
+        }),
     });
   } catch (error) {
     console.error("Scholarship confirmation email failed:", error);
@@ -505,6 +530,8 @@ export async function POST(request: Request) {
         sendStudentSubmissionConfirmation({
           application: savedApplication,
           fallbackEmail: user.email,
+          serviceRoleKey,
+          url,
         })
       );
     }

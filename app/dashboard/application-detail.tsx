@@ -50,6 +50,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { DashboardActionPermissions } from "@/lib/dashboard-permissions";
 import type {
+  DashboardRole,
   Conference,
   Journal,
   PlannedResearch,
@@ -58,8 +59,11 @@ import type {
   ResearchExperience,
   ScholarshipApplication,
   ScholarshipCorrectionRecord,
+  ScholarshipEmailLog,
   ScholarshipPayload,
+  ScholarshipEmailStatus,
 } from "@/lib/types";
+import { SCHOLARSHIP_EMAIL_TYPE_LABELS } from "@/lib/types";
 import {
   ADMISSION_CHANNEL_OPTIONS,
   DATABASE_OPTIONS,
@@ -116,6 +120,7 @@ type ApplicationDetailProps = {
   onOpenChange: (open: boolean) => void;
   onUpdated?: (application: ScholarshipApplication) => void;
   permissions: DashboardActionPermissions;
+  role: DashboardRole;
   onDeleted?: (applicationId: string) => void;
 };
 
@@ -474,6 +479,24 @@ function formatCorrectionCreatedAt(value: string) {
   });
 }
 
+function formatEmailSentAt(value: string) {
+  return new Date(value).toLocaleString("zh-TW", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function EmailStatusBadge({ status }: { status: ScholarshipEmailStatus }) {
+  return status === "success" ? (
+    <Badge className="bg-emerald-100 text-emerald-800">成功</Badge>
+  ) : (
+    <Badge className="bg-red-100 text-red-700">失敗</Badge>
+  );
+}
+
 function CorrectionRecordsCard({
   loading,
   records,
@@ -528,6 +551,90 @@ function CorrectionRecordsCard({
   );
 }
 
+function EmailLogsCard({
+  canResend,
+  loading,
+  records,
+  resendingId,
+  onResend,
+}: {
+  canResend: boolean;
+  loading: boolean;
+  records: ScholarshipEmailLog[];
+  resendingId: string | null;
+  onResend: (logId: string) => void;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Mail className="size-4 text-sky-600" />
+          寄送紀錄
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {loading ? (
+          <p className="text-sm text-slate-500">正在載入寄送紀錄...</p>
+        ) : records.length === 0 ? (
+          <p className="text-sm text-slate-500">尚無寄送紀錄。</p>
+        ) : (
+          records.map((record) => (
+            <div
+              key={record.id}
+              className="rounded-md border border-slate-200 bg-slate-50/70 p-3"
+            >
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <EmailStatusBadge status={record.status} />
+                <Badge variant="outline">
+                  {SCHOLARSHIP_EMAIL_TYPE_LABELS[record.email_type]}
+                </Badge>
+                <span>{formatEmailSentAt(record.sent_at)}</span>
+              </div>
+              <div className="mt-2 grid gap-1 text-xs text-slate-600 sm:grid-cols-[72px_1fr]">
+                <span className="font-medium text-slate-500">收件者</span>
+                <span className="break-all">
+                  {record.recipient_email || "未設定"}
+                </span>
+                <span className="font-medium text-slate-500">Resend ID</span>
+                <span className="break-all font-mono">
+                  {record.resend_message_id || "—"}
+                </span>
+                {record.failure_reason ? (
+                  <>
+                    <span className="font-medium text-slate-500">原因</span>
+                    <span className="text-red-600">
+                      {record.failure_reason}
+                    </span>
+                  </>
+                ) : null}
+              </div>
+              {canResend ? (
+                <div className="mt-3 flex justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1 text-xs"
+                    disabled={resendingId === record.id}
+                    onClick={() => onResend(record.id)}
+                  >
+                    {resendingId === record.id ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="size-3.5" />
+                    )}
+                    重寄
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ))
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                           */
 /* ------------------------------------------------------------------ */
@@ -538,6 +645,7 @@ export function ApplicationDetail({
   onOpenChange,
   onUpdated,
   permissions,
+  role,
   onDeleted,
 }: ApplicationDetailProps) {
   const [verifyingAll, setVerifyingAll] = useState(false);
@@ -557,6 +665,11 @@ export function ApplicationDetail({
   >([]);
   const [loadingCorrectionRecords, setLoadingCorrectionRecords] =
     useState(false);
+  const [emailLogs, setEmailLogs] = useState<ScholarshipEmailLog[]>([]);
+  const [loadingEmailLogs, setLoadingEmailLogs] = useState(false);
+  const [resendingEmailLogId, setResendingEmailLogId] = useState<string | null>(
+    null
+  );
 
   // Reset local state when switching to a different application
   useEffect(() => {
@@ -569,6 +682,9 @@ export function ApplicationDetail({
     setExportingPdf(false);
     setCorrectionRecords([]);
     setLoadingCorrectionRecords(false);
+    setEmailLogs([]);
+    setLoadingEmailLogs(false);
+    setResendingEmailLogId(null);
   }, [application?.id]);
 
   const loadCorrectionRecords = useCallback(async (applicationId: string) => {
@@ -595,13 +711,38 @@ export function ApplicationDetail({
     }
   }, []);
 
+  const loadEmailLogs = useCallback(async (applicationId: string) => {
+    setLoadingEmailLogs(true);
+    try {
+      const res = await fetch(
+        `/api/dashboard/email-logs?applicationId=${encodeURIComponent(
+          applicationId
+        )}`
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success || !Array.isArray(data.records)) {
+        toast.error(data.error || "寄送紀錄載入失敗。");
+        setEmailLogs([]);
+        return;
+      }
+
+      setEmailLogs(data.records as ScholarshipEmailLog[]);
+    } catch {
+      toast.error("寄送紀錄載入失敗。");
+      setEmailLogs([]);
+    } finally {
+      setLoadingEmailLogs(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!open || !application?.id) {
       return;
     }
 
     loadCorrectionRecords(application.id);
-  }, [application?.id, loadCorrectionRecords, open]);
+    loadEmailLogs(application.id);
+  }, [application?.id, loadCorrectionRecords, loadEmailLogs, open]);
 
   const triggerVerify = useCallback(
     async (journalIndex?: number) => {
@@ -743,6 +884,9 @@ export function ApplicationDetail({
         onUpdated?.(updated);
       }
       await loadCorrectionRecords(application.id);
+      setTimeout(() => {
+        loadEmailLogs(application.id);
+      }, 1500);
       setCorrectionOpen(false);
       setCorrectionMessage("");
       toast.success("申請案已退回可修改，補正通知信將寄出。");
@@ -751,7 +895,42 @@ export function ApplicationDetail({
     } finally {
       setSendingCorrection(false);
     }
-  }, [application, correctionMessage, loadCorrectionRecords, onUpdated]);
+  }, [
+    application,
+    correctionMessage,
+    loadCorrectionRecords,
+    loadEmailLogs,
+    onUpdated,
+  ]);
+
+  const handleResendEmail = useCallback(
+    async (logId: string) => {
+      if (!application) return;
+      setResendingEmailLogId(logId);
+      try {
+        const res = await fetch("/api/dashboard/email-logs/resend", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ logId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+          toast.error(data.error || "重寄通知信失敗。");
+          return;
+        }
+
+        toast.success("已排入背景重寄。");
+        setTimeout(() => {
+          loadEmailLogs(application.id);
+        }, 1500);
+      } catch {
+        toast.error("重寄通知信請求失敗。");
+      } finally {
+        setResendingEmailLogId(null);
+      }
+    },
+    [application, loadEmailLogs]
+  );
 
   const handleDelete = useCallback(async () => {
     if (!application) return;
@@ -1036,10 +1215,19 @@ export function ApplicationDetail({
 
         <div className="px-4 pb-6">
           <div className="mb-4 mt-4">
-            <CorrectionRecordsCard
-              loading={loadingCorrectionRecords}
-              records={correctionRecords}
-            />
+            <div className="space-y-4">
+              <CorrectionRecordsCard
+                loading={loadingCorrectionRecords}
+                records={correctionRecords}
+              />
+              <EmailLogsCard
+                canResend={role === "admin"}
+                loading={loadingEmailLogs}
+                records={emailLogs}
+                resendingId={resendingEmailLogId}
+                onResend={handleResendEmail}
+              />
+            </div>
           </div>
 
           <Tabs defaultValue="basic" className="flex-col">

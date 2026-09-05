@@ -5,6 +5,7 @@ import {
 } from "@/lib/auth";
 import { getDashboardRolePermissions } from "@/lib/dashboard-permissions";
 import { sendScholarshipCorrectionEmail } from "@/lib/email/resend";
+import { sendAndLogScholarshipEmail } from "@/lib/email/scholarship-email-logs";
 import { patchScholarshipApplication } from "@/lib/supabase/patch-application";
 import type { ScholarshipPayload } from "@/lib/types";
 import { isValidEmail, isValidUUID } from "@/lib/validation";
@@ -39,10 +40,13 @@ type CorrectionRecord = {
 type CorrectionEmailJob = {
   applicationId: string;
   applicantName: string;
+  correctionRecordId: string;
   department: string;
   message: string;
   recipientEmail: string;
+  serviceRoleKey: string;
   scholarshipProgram: string;
+  url: string;
 };
 
 function getSupabaseConfig() {
@@ -73,7 +77,18 @@ function getRecipientEmail(application: ScholarshipApplicationRecord) {
 
 async function sendCorrectionNotice(job: CorrectionEmailJob) {
   try {
-    await sendScholarshipCorrectionEmail(job);
+    await sendAndLogScholarshipEmail({
+      applicationId: job.applicationId,
+      emailType: "student_correction_notice",
+      metadata: {
+        correction_record_id: job.correctionRecordId,
+        message: job.message,
+      },
+      recipientEmail: job.recipientEmail,
+      serviceRoleKey: job.serviceRoleKey,
+      url: job.url,
+      send: () => sendScholarshipCorrectionEmail(job),
+    });
   } catch (error) {
     console.error("Scholarship correction email failed:", error);
   }
@@ -240,7 +255,7 @@ export async function POST(request: Request) {
       return jsonError("找不到可寄送的學生 Email。");
     }
 
-    const emailJob: CorrectionEmailJob = {
+    const emailJobBase = {
       applicationId: application.id,
       applicantName:
         application.applicant_name ||
@@ -252,7 +267,9 @@ export async function POST(request: Request) {
         "",
       message,
       recipientEmail,
+      serviceRoleKey,
       scholarshipProgram: application.scholarship_program || "獎學金申請",
+      url,
     };
 
     const updateResult = await patchScholarshipApplication({
@@ -288,7 +305,12 @@ export async function POST(request: Request) {
       url,
     });
 
-    after(() => sendCorrectionNotice(emailJob));
+    after(() =>
+      sendCorrectionNotice({
+        ...emailJobBase,
+        correctionRecordId: correctionRecord.id,
+      })
+    );
 
     return NextResponse.json({
       success: true,

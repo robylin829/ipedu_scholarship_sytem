@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { ScholarshipApplication } from "@/lib/types";
+import type { DashboardRole, ScholarshipApplication } from "@/lib/types";
 import type { DashboardActionPermissions } from "@/lib/dashboard-permissions";
 import {
   DEFAULT_SCHOLARSHIP_PROGRAM_SETTINGS,
@@ -44,10 +44,12 @@ export function ScholarshipProgramSwitcher({
   applications,
   programs = DEFAULT_SCHOLARSHIP_PROGRAM_SETTINGS,
   permissions,
+  role,
 }: {
   applications: ScholarshipApplication[];
   programs?: ScholarshipProgramSetting[];
   permissions: DashboardActionPermissions;
+  role: DashboardRole;
 }) {
   const counts = useMemo(() => {
     const map = new Map<string, number>();
@@ -95,6 +97,7 @@ export function ScholarshipProgramSwitcher({
           <DashboardTable
             applications={applications}
             permissions={permissions}
+            role={role}
           />
         </TabsContent>
         {programs.map((program) => {
@@ -115,6 +118,7 @@ export function ScholarshipProgramSwitcher({
                 key={program.program_key}
                 applications={filteredApplications}
                 permissions={permissions}
+                role={role}
               />
             </TabsContent>
           );

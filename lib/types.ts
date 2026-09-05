@@ -213,6 +213,34 @@ export type ScholarshipCorrectionRecord = {
   created_at: string;
 };
 
+export type ScholarshipEmailType =
+  | "student_submission_confirmation"
+  | "student_correction_notice"
+  | "department_resubmission_notice";
+
+export type ScholarshipEmailStatus = "success" | "failed";
+
+export type ScholarshipEmailLog = {
+  id: string;
+  application_id: string;
+  recipient_email: string;
+  email_type: ScholarshipEmailType;
+  sent_at: string;
+  resend_message_id: string | null;
+  status: ScholarshipEmailStatus;
+  failure_reason: string | null;
+  metadata: Record<string, unknown>;
+};
+
+export const SCHOLARSHIP_EMAIL_TYPE_LABELS: Record<
+  ScholarshipEmailType,
+  string
+> = {
+  department_resubmission_notice: "系所重新送出通知",
+  student_correction_notice: "補正通知信",
+  student_submission_confirmation: "學生送件確認信",
+};
+
 /* ------------------------------------------------------------------ */
 /*  Publication verification types                                     */
 /* ------------------------------------------------------------------ */

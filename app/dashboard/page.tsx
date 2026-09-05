@@ -155,6 +155,7 @@ export default async function DashboardPage() {
                 applications={applications}
                 programs={programs}
                 permissions={permissions}
+                role={auth.role}
               />
             }
             adminContent={<AdminPanel />}
@@ -171,6 +172,7 @@ export default async function DashboardPage() {
               applications={applications}
               programs={programs}
               permissions={permissions}
+              role={auth.role}
             />
           </>
         )}

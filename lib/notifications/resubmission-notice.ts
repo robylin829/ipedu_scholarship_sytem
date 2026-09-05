@@ -1,4 +1,8 @@
 import { sendDepartmentResubmissionEmail } from "@/lib/email/resend";
+import {
+  recordScholarshipEmailLog,
+  sendAndLogScholarshipEmail,
+} from "@/lib/email/scholarship-email-logs";
 import { resolveDepartmentNotificationRecipients } from "@/lib/notifications/department-recipients";
 
 /**
@@ -98,6 +102,16 @@ export async function notifyDepartmentOfResubmission({
       console.info(
         `No department notification recipients configured for "${department}".`
       );
+      await recordScholarshipEmailLog({
+        applicationId,
+        emailType: "department_resubmission_notice",
+        failureReason: "找不到可寄送的系所通知信箱。",
+        metadata: { department },
+        recipientEmail: "",
+        serviceRoleKey,
+        status: "failed",
+        url,
+      });
       return;
     }
 
@@ -111,18 +125,37 @@ export async function notifyDepartmentOfResubmission({
     // Sequential (list is <= 5) keeps us under Resend's rate limit, and one call
     // per account means one department's addresses never reach another's inbox.
     for (const recipient of recipients) {
+      const idempotencySuffix = `${recipient.accountKey}-${minuteBucket}`;
+      const metadata = {
+        account_key: recipient.accountKey,
+        dashboard_url: dashboardUrl,
+        display_name: recipient.displayName,
+        idempotency_suffix: idempotencySuffix,
+        is_correction_resubmission: isCorrectionResubmission,
+        recipient_emails: recipient.emails,
+        role: recipient.role,
+      };
       try {
-        await sendDepartmentResubmissionEmail({
-          applicantName,
+        await sendAndLogScholarshipEmail({
           applicationId,
-          dashboardUrl,
-          department,
-          idempotencySuffix: `${recipient.accountKey}-${minuteBucket}`,
-          isCorrectionResubmission,
-          recipientEmails: recipient.emails,
-          scholarshipProgram,
-          studentId,
-          submittedAt,
+          emailType: "department_resubmission_notice",
+          metadata,
+          recipientEmail: recipient.emails.join(", "),
+          serviceRoleKey,
+          url,
+          send: () =>
+            sendDepartmentResubmissionEmail({
+              applicantName,
+              applicationId,
+              dashboardUrl,
+              department,
+              idempotencySuffix,
+              isCorrectionResubmission,
+              recipientEmails: recipient.emails,
+              scholarshipProgram,
+              studentId,
+              submittedAt,
+            }),
         });
       } catch (error) {
         // Missing RESEND_API_KEY, unverified domain, a bad address — log only.

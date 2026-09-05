@@ -30,7 +30,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import type { ReviewStatus, ScholarshipApplication } from "@/lib/types";
+import type { DashboardRole, ReviewStatus, ScholarshipApplication } from "@/lib/types";
 import type { DashboardActionPermissions } from "@/lib/dashboard-permissions";
 import { REVIEW_STATUS_LABELS } from "@/lib/types";
 import {
@@ -474,9 +474,11 @@ function StudyStatusFilterChip({
 export function DashboardTable({
   applications,
   permissions,
+  role,
 }: {
   applications: ScholarshipApplication[];
   permissions: DashboardActionPermissions;
+  role: DashboardRole;
 }) {
   const [sortColumn, setSortColumn] =
     useState<SortColumn>("reviewSortOrder");
@@ -985,6 +987,7 @@ export function DashboardTable({
         }}
         onUpdated={applyUpdatedApplication}
         permissions={permissions}
+        role={role}
         onDeleted={(id) => {
           markDeleted(id);
           setSelectedApp(null);

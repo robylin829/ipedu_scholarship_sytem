@@ -1147,7 +1147,95 @@ create policy "Service role can manage correction records"
   with check (true);
 
 -- ============================================================
--- 5. Storage setup
+-- 5. scholarship_email_logs
+-- ============================================================
+
+create table if not exists public.scholarship_email_logs (
+  id uuid primary key default gen_random_uuid(),
+  application_id uuid not null references public.scholarship_applications(id) on delete cascade,
+  recipient_email text not null default '',
+  email_type text not null,
+  sent_at timestamptz not null default now(),
+  resend_message_id text,
+  status text not null,
+  failure_reason text,
+  metadata jsonb not null default '{}'::jsonb
+);
+
+alter table public.scholarship_email_logs
+  add column if not exists application_id uuid references public.scholarship_applications(id) on delete cascade,
+  add column if not exists recipient_email text,
+  add column if not exists email_type text,
+  add column if not exists sent_at timestamptz not null default now(),
+  add column if not exists resend_message_id text,
+  add column if not exists status text,
+  add column if not exists failure_reason text,
+  add column if not exists metadata jsonb not null default '{}'::jsonb;
+
+alter table public.scholarship_email_logs
+  alter column application_id set not null,
+  alter column recipient_email set not null,
+  alter column recipient_email set default '',
+  alter column email_type set not null,
+  alter column sent_at set not null,
+  alter column sent_at set default now(),
+  alter column status set not null,
+  alter column metadata set not null,
+  alter column metadata set default '{}'::jsonb,
+  drop constraint if exists scholarship_email_logs_email_type_check,
+  add constraint scholarship_email_logs_email_type_check
+    check (
+      email_type in (
+        'student_submission_confirmation',
+        'student_correction_notice',
+        'department_resubmission_notice'
+      )
+    ),
+  drop constraint if exists scholarship_email_logs_status_check,
+  add constraint scholarship_email_logs_status_check
+    check (status in ('success', 'failed'));
+
+comment on table public.scholarship_email_logs is '獎學金系統寄信成功或失敗的可查詢紀錄';
+comment on column public.scholarship_email_logs.recipient_email is '當次寄送收件者；多收件者以逗號分隔';
+comment on column public.scholarship_email_logs.email_type is '寄信類型：學生送件確認、補正通知、系所重新送出通知';
+comment on column public.scholarship_email_logs.sent_at is '當次寄送嘗試完成並寫入紀錄的時間';
+comment on column public.scholarship_email_logs.resend_message_id is 'Resend 回傳的 message ID；失敗時為空';
+comment on column public.scholarship_email_logs.failure_reason is '寄送失敗原因；成功時為空';
+comment on column public.scholarship_email_logs.metadata is '重寄所需的附加資料，例如補正紀錄 ID 或系所收件帳號';
+
+create index if not exists idx_email_logs_application_id
+  on public.scholarship_email_logs(application_id);
+create index if not exists idx_email_logs_sent_at
+  on public.scholarship_email_logs(sent_at desc);
+create index if not exists idx_email_logs_email_type
+  on public.scholarship_email_logs(email_type);
+
+alter table public.scholarship_email_logs enable row level security;
+
+drop policy if exists "Teachers can view email logs"
+  on public.scholarship_email_logs;
+create policy "Teachers can view email logs"
+  on public.scholarship_email_logs for select
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('teacher', 'admin')
+    )
+  );
+
+drop policy if exists "Service role can manage email logs"
+  on public.scholarship_email_logs;
+create policy "Service role can manage email logs"
+  on public.scholarship_email_logs for all
+  to service_role
+  using (true)
+  with check (true);
+
+-- ============================================================
+-- 6. Storage setup
 -- ============================================================
 -- Supabase documents the `storage` schema as Storage-managed metadata.
 -- This migration intentionally does not insert/update/delete rows or alter/drop
@@ -1215,7 +1303,8 @@ create policy "Teachers can view all documents"
 -- 6. View and helper functions
 -- ============================================================
 
-create or replace view public.application_summary as
+create or replace view public.application_summary
+with (security_invoker = true) as
 select
   a.id,
   a.user_id,
@@ -1242,7 +1331,7 @@ select
 from public.scholarship_applications a
 left join public.profiles p on p.id = a.reviewed_by;
 
-comment on view public.application_summary is '教師 Dashboard 用的申請案摘要，包含從 payload 提取的常用欄位';
+comment on view public.application_summary is '教師 Dashboard 用的申請案摘要，包含從 payload 提取的常用欄位；以查詢者權限套用底層 RLS';
 
 create or replace function public.get_journals(app_id uuid)
 returns jsonb
@@ -1270,6 +1359,8 @@ grant select, update on public.profiles to authenticated;
 grant select, insert, update on public.scholarship_applications to authenticated;
 grant select on public.review_logs to authenticated;
 grant select on public.scholarship_correction_records to authenticated;
+grant select on public.scholarship_email_logs to authenticated;
+grant select, insert, update, delete on public.scholarship_email_logs to service_role;
 grant select on public.application_summary to authenticated;
 grant execute on function public.get_journals(uuid) to authenticated;
 grant execute on function public.get_conferences(uuid) to authenticated;
